@@ -1,100 +1,124 @@
 from random import SystemRandom
-from time import perf_counter
+from time import perf_counter_ns
 
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from numpy import array
+from matplotlib.pyplot import Axes, Figure, Text
+from numpy import array, log2, ndarray, round, zeros
 
 
 class Game:
-    class State:
-        def __init__(self, **kwargs):
-            self.west = kwargs.get("west") or False
-            self.east = kwargs.get("east") or False
-            self.north = kwargs.get("north") or False
-            self.south = kwargs.get("south") or False
-            self.northwest = kwargs.get("northwest") or False
-            self.northeast = kwargs.get("northeast") or False
-            self.southwest = kwargs.get("southwest") or False
-            self.southeast = kwargs.get("southeast") or False
-
-        def dict(self):
-            return dict(
-                west=self.west,
-                east=self.east,
-                north=self.north,
-                south=self.south,
-                northwest=self.northwest,
-                northeast=self.northeast,
-                southwest=self.southwest,
-                southeast=self.southeast,
-            )
-
-        def count_alive(self):
-            return len([s for s in self.dict().values() if s])
-
-    def __init__(self, size: int = 50, threshold: float = 0.5):
+    def __init__(
+        self,
+        size: int = 128,
+        threshold: float = 0.93,
+        fps: float = 23.976,
+        initial_universe: ndarray = None,
+        birth_rule: list[int] = None,
+        survive_rule: list[int] = None,
+        visualize: bool = True,
+    ):
         random = SystemRandom()
         plt.style.use("seaborn")
         plt.rcParams.update(
             {
-                "figure.figsize": (7, 7),
-                "figure.dpi": 100,
+                "figure.figsize": (5, 5),
+                "figure.dpi": 200,
             }
         )
-        random.seed(42)
+
+        if log2(size) % 1 != 0:
+            raise ValueError(f"`size` must be an integer power of 2 (got {size})")
+        if birth_rule is None:
+            birth_rule = [3]
+        if survive_rule is None:
+            survive_rule = [2, 3]
+        if initial_universe is None:
+            initial_universe = array([random.random() > threshold for _ in range(size**2)]).reshape((size, size))
+
         self.generation = 1
         self.N = size
-        self.universe = array([random.random() > threshold for _ in range(size**2)]).reshape((size, size))
-        self.fig = plt.figure()
-        self.ax = self.fig.add_subplot(111)
-        self.img = self.ax.imshow(self.universe, cmap="gray", animated=True)
-        self.text_template = "Generation: %i\n%i FPS"
-        self.text = self.ax.text(0.025, 0.025, "", transform=self.ax.transAxes, fontsize=12, color="c")
-        self.last_time = perf_counter()
-        self.main()
+        self.fps = fps
+        self.visualize = visualize
+        self.birth_rule = birth_rule
+        self.survive_rule = survive_rule
+        self.universe: ndarray = initial_universe.astype(bool)
+        if self.visualize:
+            self.fig: Figure = plt.figure()
+            self.ax: Axes = self.fig.add_subplot(111)
+            self.ax.set_xlim(0, self.N - 1)
+            self.ax.set_ylim(0, self.N - 1)
+            self.ax.grid(False)
+            self.ax.axis("off")
+            self.fig.tight_layout()
+            self.img = self.ax.imshow(self.universe, cmap="gray", origin="lower", animated=True)
+            self.text_template = "\n".join(
+                [
+                    "gen: %i",
+                    "req ms: %.2f (%i fps)",
+                    "act ms: %.2f (%i fps)",
+                ]
+            )
+            self.text: Text = self.ax.text(0.025, 0.025, "", transform=self.ax.transAxes, fontsize=10, color="c")
+        self.last_time = perf_counter_ns()
 
     def init(self):
-        self.ax.set_xlim(0, self.N)
-        self.ax.set_ylim(0, self.N)
-        self.ax.axis("off")
-        self.ax.grid(False)
         self.text.set_text("")
         return self.img, self.text
 
     def update(self, _):
-        universe = self.universe
-        for j in range(self.N):
-            for i in range(self.N):
-                state = self.State()
-                if 0 < i < self.N - 1:
-                    state.west = universe[j, i - 1]
-                    state.east = universe[j, i + 1]
-                if 0 < j < self.N - 1:
-                    state.north = universe[j - 1, i]
-                    state.south = universe[j + 1, i]
-                if 0 < i < self.N - 1 and 0 < j < self.N - 1:
-                    state.northwest = universe[j - 1, i - 1]
-                    state.northeast = universe[j - 1, i + 1]
-                    state.southwest = universe[j + 1, i - 1]
-                    state.southeast = universe[j + 1, i + 1]
-
-                universe[j, i] = int(
-                    (universe[j, i] and 2 <= state.count_alive() <= 3)
-                    or (not universe[j, i] and state.count_alive() == 3)
+        N = self.N
+        previous_universe = self.universe
+        universe = self.universe.copy()
+        for j in range(N):
+            pure_north = 0 if j + 1 > N - 1 else j + 1
+            pure_south = N - 1 if j - 1 < 0 else j - 1
+            for i in range(N):
+                pure_east = 0 if i + 1 > N - 1 else i + 1
+                pure_west = N - 1 if i - 1 < 0 else i - 1
+                neighbors = [
+                    (pure_north, i),  # N
+                    (pure_south, i),  # S
+                    (j, pure_east),  # E
+                    (j, pure_west),  # W
+                    (pure_north, pure_west),  # NW
+                    (pure_north, pure_east),  # NE
+                    (pure_south, pure_west),  # SW
+                    (pure_south, pure_east),  # SE
+                ]
+                state = [previous_universe[nb] for nb in neighbors]
+                alive_count = len([s for s in state if s])
+                current_cell = previous_universe[j, i]
+                universe[j, i] = (current_cell and alive_count in self.survive_rule) or (
+                    not current_cell and alive_count in self.birth_rule
                 )
         self.universe = universe
-        self.img.set_data(self.universe)
-        last_time = perf_counter()
-        self.text.set_text(self.text_template % (self.generation, round(1 / (last_time - self.last_time))))
-        self.last_time = last_time
+        if self.visualize:
+            self.img.set_data(self.universe)
+            last_time = perf_counter_ns()
+            diff = last_time - self.last_time
+            self.text.set_text(
+                self.text_template
+                % (self.generation, round(1e3 / self.fps, 2), self.fps, round(diff / 1e6, 2), (1e9 // diff))
+            )
+            self.last_time = last_time
         self.generation += 1
-        return self.img, self.text
+        if self.visualize:
+            return self.img, self.text
 
-    def main(self):
-        _ = FuncAnimation(self.fig, self.update, self.N, interval=int(1 / 60 * 1000), init_func=self.init, blit=True)
-        plt.show()
+    def run(self):
+        if self.visualize:
+            _ = FuncAnimation(self.fig, self.update, interval=int(1 / self.fps * 1000), init_func=self.init)
+            plt.show()
+        else:
+            last_gen = self.generation
+            while True:
+                self.update(0)
+                if ((perf_counter_ns() - self.last_time) / 1e9) >= 1:
+                    print(f"{self.generation - last_gen} gen/s")
+                    last_gen = self.generation
+                    self.last_time = perf_counter_ns()
 
 
 if __name__ == "__main__":
-    Game(size=50, threshold=0.93)
+    Game().run()
