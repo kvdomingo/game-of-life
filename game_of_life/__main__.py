@@ -4,7 +4,7 @@ from time import perf_counter_ns
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from matplotlib.pyplot import Axes, Figure, Text
-from numpy import array, log2, ndarray, round, zeros
+from numpy import array, log2, ndarray, round
 
 
 class Game:
@@ -54,9 +54,9 @@ class Game:
             self.img = self.ax.imshow(self.universe, cmap="gray", origin="lower", animated=True)
             self.text_template = "\n".join(
                 [
-                    "gen: %i",
-                    "req ms: %.2f (%i fps)",
-                    "act ms: %.2f (%i fps)",
+                    "gen: {0}",
+                    "req ms: {1:.2f} ({2} fps)",
+                    "act ms: {3:.2f} ({4} fps)",
                 ]
             )
             self.text: Text = self.ax.text(0.025, 0.025, "", transform=self.ax.transAxes, fontsize=10, color="c")
@@ -98,8 +98,13 @@ class Game:
             last_time = perf_counter_ns()
             diff = last_time - self.last_time
             self.text.set_text(
-                self.text_template
-                % (self.generation, round(1e3 / self.fps, 2), self.fps, round(diff / 1e6, 2), (1e9 // diff))
+                self.text_template.format(
+                    self.generation,
+                    round(1e3 / self.fps, 2),
+                    round(self.fps).astype(int),
+                    round(diff / 1e6, 2),
+                    round(1e9 // diff).astype(int),
+                )
             )
             self.last_time = last_time
         self.generation += 1
