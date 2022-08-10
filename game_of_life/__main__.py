@@ -1,3 +1,4 @@
+from argparse import ArgumentParser
 from random import SystemRandom
 from time import perf_counter_ns
 
@@ -50,6 +51,7 @@ class Game:
             self.ax.set_ylim(0, self.N - 1)
             self.ax.grid(False)
             self.ax.axis("off")
+            self.ax.set_title(f"B{''.join([str(b) for b in birth_rule])}/S{''.join([str(s) for s in survive_rule])}")
             self.fig.tight_layout()
             self.img = self.ax.imshow(self.universe, cmap="gray", origin="lower", animated=True)
             self.text_template = "\n".join(
@@ -71,11 +73,11 @@ class Game:
         previous_universe = self.universe
         universe = self.universe.copy()
         for j in range(N):
-            pure_north = 0 if j + 1 > N - 1 else j + 1
-            pure_south = N - 1 if j - 1 < 0 else j - 1
+            pure_north = (j + 1) % N
+            pure_south = (j - 1) % N
             for i in range(N):
-                pure_east = 0 if i + 1 > N - 1 else i + 1
-                pure_west = N - 1 if i - 1 < 0 else i - 1
+                pure_east = (i + 1) % N
+                pure_west = (i - 1) % N
                 neighbors = [
                     (pure_north, i),  # N
                     (pure_south, i),  # S
@@ -126,4 +128,28 @@ class Game:
 
 
 if __name__ == "__main__":
-    Game().run()
+    parser = ArgumentParser()
+    parser.add_argument(
+        "-s", "--size", help="Length of the square lattice, must be an integer power of 2", type=int, default=128
+    )
+    parser.add_argument("-t", "--threshold", help="Random initializer threshold", type=float, default=0.93)
+    parser.add_argument("-r", "--rulestring", help="Rulestring to use. Uses CGOL default (B3/S23)", default="B3/S23")
+    parser.add_argument("--fps", help="Requested FPS", type=float, default=23.976)
+    args = parser.parse_args()
+
+    if log2(args.size) % 1 != 0:
+        raise ValueError(f"`--size` must be an integer power of 2 (got {args.size})")
+
+    birth_string, survive_string = args.rulestring.split("/")
+    birth_string = birth_string.strip("B")
+    survive_string = survive_string.strip("S")
+    birth_rule = [int(b) for b in birth_string]
+    survive_rule = [int(s) for s in survive_string]
+
+    Game(
+        size=args.size,
+        threshold=args.threshold,
+        fps=args.fps,
+        birth_rule=birth_rule,
+        survive_rule=survive_rule,
+    ).run()
