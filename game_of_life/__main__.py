@@ -1,11 +1,10 @@
 from argparse import ArgumentParser
 from random import SystemRandom
-from time import perf_counter_ns
+from time import perf_counter
 
+import cv2 as cv
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
-from matplotlib.pyplot import Axes, Figure, Text
-from numpy import array, log2, ndarray, round
+from numpy import array, floor, log2, ndarray
 
 
 class Game:
@@ -43,32 +42,21 @@ class Game:
         self.visualize = visualize
         self.birth_rule = birth_rule
         self.survive_rule = survive_rule
-        self.universe: ndarray = initial_universe.astype(bool)
+        self.universe: ndarray = initial_universe.astype("bool")
+        self.last_time = perf_counter()
+        self.last_fps = 0
+        self.window = "game"
+
         if self.visualize:
-            self.fig: Figure = plt.figure()
-            self.ax: Axes = self.fig.add_subplot(111)
-            self.ax.set_xlim(0, self.N - 1)
-            self.ax.set_ylim(0, self.N - 1)
-            self.ax.grid(False)
-            self.ax.axis("off")
-            self.ax.set_title(f"B{''.join([str(b) for b in birth_rule])}/S{''.join([str(s) for s in survive_rule])}")
-            self.fig.tight_layout()
-            self.img = self.ax.imshow(self.universe, cmap="gray", origin="lower", animated=True)
-            self.text_template = "\n".join(
-                [
-                    "gen: {0}",
-                    "req ms: {1:.2f} ({2} fps)",
-                    "act ms: {3:.2f} ({4} fps)",
-                ]
-            )
-            self.text: Text = self.ax.text(0.025, 0.025, "", transform=self.ax.transAxes, fontsize=10, color="c")
-        self.last_time = perf_counter_ns()
+            cv.namedWindow(self.window, cv.WINDOW_NORMAL)
+            cv.resizeWindow(self.window, 1024, 1024)
 
-    def init(self):
-        self.text.set_text("")
-        return self.img, self.text
+    def evaluate_life(self, current_cell: bool, alive_count: int):
+        return (current_cell and alive_count in self.survive_rule) or (
+            not current_cell and alive_count in self.birth_rule
+        )
 
-    def update(self, _):
+    def update(self):
         N = self.N
         previous_universe = self.universe
         universe = self.universe.copy()
@@ -91,40 +79,30 @@ class Game:
                 state = [previous_universe[nb] for nb in neighbors]
                 alive_count = len([s for s in state if s])
                 current_cell = previous_universe[j, i]
-                universe[j, i] = (current_cell and alive_count in self.survive_rule) or (
-                    not current_cell and alive_count in self.birth_rule
-                )
+                universe[j, i] = self.evaluate_life(current_cell, alive_count)
         self.universe = universe
-        if self.visualize:
-            self.img.set_data(self.universe)
-            last_time = perf_counter_ns()
-            diff = last_time - self.last_time
-            self.text.set_text(
-                self.text_template.format(
-                    self.generation,
-                    round(1e3 / self.fps, 2),
-                    round(self.fps).astype(int),
-                    round(diff / 1e6, 2),
-                    round(1e9 // diff).astype(int),
-                )
-            )
-            self.last_time = last_time
+        self.last_fps = int(floor(1 / (perf_counter() - self.last_time)))
+        self.last_time = perf_counter()
         self.generation += 1
-        if self.visualize:
-            return self.img, self.text
 
     def run(self):
         if self.visualize:
-            _ = FuncAnimation(self.fig, self.update, interval=int(1 / self.fps * 1000), init_func=self.init)
-            plt.show()
+            while True:
+                self.update()
+                cv.imshow(self.window, self.universe.astype("uint8") * 255)
+                cv.setWindowTitle(self.window, f"{self.window} - {self.last_fps} FPS / Gen {self.generation}")
+                key = cv.waitKey(1) & 0xFF
+                if key == ord("q"):
+                    break
+            cv.destroyAllWindows()
         else:
             last_gen = self.generation
             while True:
-                self.update(0)
-                if ((perf_counter_ns() - self.last_time) / 1e9) >= 1:
+                self.update()
+                if (perf_counter() - self.last_time) >= 1:
                     print(f"{self.generation - last_gen} gen/s")
                     last_gen = self.generation
-                    self.last_time = perf_counter_ns()
+                    self.last_time = perf_counter()
 
 
 if __name__ == "__main__":
